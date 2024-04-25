@@ -6,6 +6,7 @@
 - Build : Gradle
 - JDK : JDK 17
 - DataBase : H2 Database
+- Library : Google guava
 
 ## 🎯 ERD
 ![img.png](docs/img/erd.png)
