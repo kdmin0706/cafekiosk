@@ -5,13 +5,13 @@
 - Language : Java
 - Build : Gradle
 - JDK : JDK 17
-- DataBase : H2 Database
+- DataBase : H2 Database, MySQL
 - Library : Google guava
 
 ## 🎯 ERD
 ![img.png](docs/img/erd.png)
 
-## ❗ 요구사항
+## 💻 프로그램 기능 및 설계
 1. 주문 목록에 음료 추가 / 삭제 기능
 2. 주문 목록 전체 지우기
 3. 주문 목록 총 금액 계산하기
