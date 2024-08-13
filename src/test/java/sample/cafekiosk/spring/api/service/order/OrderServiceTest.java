@@ -10,6 +10,9 @@ import static sample.cafekiosk.spring.domain.product.ProductType.HANDMADE;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -17,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import sample.cafekiosk.spring.IntegrationTestSupport;
 import sample.cafekiosk.spring.api.controller.order.request.OrderCreateRequest;
 import sample.cafekiosk.spring.api.service.order.response.OrderResponse;
+import sample.cafekiosk.spring.domain.order.Order;
 import sample.cafekiosk.spring.domain.order.OrderRepository;
 import sample.cafekiosk.spring.domain.orderproduct.OrderProductRepository;
 import sample.cafekiosk.spring.domain.product.Product;
@@ -179,6 +183,50 @@ class OrderServiceTest extends IntegrationTestSupport {
     assertThatThrownBy(() -> orderService.createOrder(request.toServiceRequest(), registeredDateTime))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("재고가 부족한 상품이 있습니다.");
+  }
+
+  @Test
+  @DisplayName("주문번호 리스트를 받아 동시에 주문을 100개 생성한다.")
+  void createOrder_with100Products_concurrently() throws InterruptedException {
+    // given
+    LocalDateTime registeredDateTime = LocalDateTime.now();
+
+    Product product1 = createProduct(HANDMADE, "001", 1000);
+    Product product2 = createProduct(BOTTLE, "002", 3000);
+    Product product3 = createProduct(BAKERY, "003", 4000);
+    productRepository.saveAll(List.of(product1, product2, product3));
+
+    Stock stock1 = Stock.create("001", 100);
+    Stock stock2 = Stock.create("002", 100);
+    stockRepository.saveAll(List.of(stock1, stock2));
+
+    OrderCreateRequest request = OrderCreateRequest.builder()
+        .productNumbers(List.of("001", "002"))
+        .build();
+
+    int threadCount = 100;
+    ExecutorService executorService = Executors.newFixedThreadPool(threadCount);
+    CountDownLatch countDownLatch = new CountDownLatch(threadCount);
+
+    // when
+    for (int i = 0; i < threadCount; i++) {
+      executorService.submit(() -> {
+        try {
+          orderService.createOrder(request.toServiceRequest(), registeredDateTime);
+        } catch (Exception e) {
+          System.err.println("Error creating order: " + e.getMessage());
+        } finally {
+          countDownLatch.countDown();
+        }
+      });
+    }
+
+    countDownLatch.await();
+    executorService.shutdown();
+
+    // then
+    List<Order> orders = orderRepository.findAll();
+    assertThat(orders).hasSize(threadCount);
   }
 
   private Product createProduct(ProductType type, String productNumber, int price) {
