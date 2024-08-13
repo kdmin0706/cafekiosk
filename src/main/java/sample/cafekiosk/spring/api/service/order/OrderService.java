@@ -6,8 +6,11 @@ import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.stereotype.Service;
 import sample.cafekiosk.spring.api.service.order.request.OrderCreateServiceRequest;
 import sample.cafekiosk.spring.api.service.order.response.OrderResponse;
@@ -24,9 +27,12 @@ import sample.cafekiosk.spring.domain.stock.StockRepository;
 @RequiredArgsConstructor
 public class OrderService {
 
+  public static final String REDISSON_LOCK_KEY = "Lock:";
   private final ProductRepository productRepository;
   private final OrderRepository orderRepository;
   private final StockRepository stockRepository;
+
+  private final RedissonClient redissonClient;
 
   public OrderResponse createOrder(OrderCreateServiceRequest request, LocalDateTime registeredDateTime) {
     List<String> productNumbers = request.getProductNumbers();
@@ -47,14 +53,30 @@ public class OrderService {
 
     // 재고 차감 시도
     for (String stockProductNumber : new HashSet<>(stockProductNumbers)) {
-      Stock stock = stockMap.get(stockProductNumber);
-      int quantity = productCountingMap.get(stockProductNumber).intValue();
+      RLock lock = redissonClient.getLock(REDISSON_LOCK_KEY + stockProductNumber);
+      boolean isLock = false;
 
-      if (stock.isQuantityLessThan(quantity)) {
-        throw new IllegalArgumentException("재고가 부족한 상품이 있습니다.");
+      try {
+        isLock = lock.tryLock(10, 1, TimeUnit.SECONDS);
+        if (!isLock) {
+          throw new IllegalArgumentException("재고 차감 중 락을 획득할 수 없습니다.");
+        }
+        Stock stock = stockMap.get(stockProductNumber);
+        int quantity = productCountingMap.get(stockProductNumber).intValue();
+
+        if (stock.isQuantityLessThan(quantity)) {
+          throw new IllegalArgumentException("재고가 부족한 상품이 있습니다.");
+        }
+
+        stock.deductQuantity(quantity);
+
+      } catch (InterruptedException e) {
+        throw new RuntimeException("인터럽트 예외가 발생하였습니다.");
+      } finally {
+        if (isLock) {
+          lock.unlock();
+        }
       }
-
-      stock.deductQuantity(quantity);
     }
   }
 
